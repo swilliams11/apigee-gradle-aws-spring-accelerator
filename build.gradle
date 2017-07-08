@@ -1,0 +1,127 @@
+description = 'Apigee Edge AWS Accelerator'
+version = '1.0'
+
+defaultTasks 'runAsync'
+
+
+def getArg(arg) {
+  if(arg == "dest"){
+    return "$dest"
+  } else if(arg == "src"){
+    return "$src"
+  }
+
+  //TODO not working correctly need to troubleshoot
+  /*if (project.hasProperty(arg)) {
+      args Eval.me("dest")
+  } else {
+    print "no arg"
+  }*/
+}
+
+task clean (type: Delete){
+
+    dest = getArg('dest')
+    def folder = new File( dest )
+
+    if( folder.exists() ) {
+      print('cleaning the directory\n')
+      delete fileTree(dir: dest, includes: ['*.*', '*/**'] )
+
+      ant.delete(includeEmptyDirs: 'true') {
+         fileset(dir: dest)
+      }
+    }
+
+}
+
+task makeDir (dependsOn: clean){
+  doLast {
+    dest = getArg('dest')
+    print "making the directory " + dest + "\n"
+    mkdir(dest)
+  }
+}
+
+task copySourceCode(dependsOn: makeDir, type: Copy) {
+    src = "$src"
+    dest = getArg('dest')
+    from src
+    into dest
+    include '*.*'
+    include '*/**'
+    //dirMode 777
+    //fileMode 777
+}
+
+task deletePomFile(dependsOn: copySourceCode, type: Delete){
+    dest = getArg('dest')
+    def destFile = dest + "/pom.xml"
+    delete destFile
+    //followSymlinks = true
+}
+
+task copySpringFoxPom (dependsOn: deletePomFile, type: Copy){
+    dest = getArg('dest')
+    from ('.')
+    into(dest)
+    include('pom.xml')
+}
+
+task copySpringConfigClass (dependsOn: copySpringFoxPom, type: Copy){
+    dest = getArg('dest')
+    def subfolder = "/src/main/java/org/springframework/samples/petclinic/util"
+
+    from ('.')
+    into(dest + subfolder)
+    include('ApplicationSwaggerConfig.java')
+}
+
+task run (dependsOn: copySpringConfigClass) {
+  doLast {
+     exec {
+      dest = getArg('dest')
+      workingDir dest
+      //ignoreExitValue true
+      //commandLine "./mvnw", "spring-boot:run"
+      executable "./mvnw"
+      args 'spring-boot:run'
+    }
+  }
+}
+
+makeDir.mustRunAfter clean
+copySourceCode.mustRunAfter makeDir
+deletePomFile.mustRunAfter copySourceCode
+copySpringFoxPom.mustRunAfter deletePomFile
+copySpringConfigClass.mustRunAfter copySpringFoxPom
+run.mustRunAfter copySpringConfigClass
+
+/*
+Create the process builder to run the server in a separate process.
+This allows Gradle to exit once it starts the server.
+*/
+def createProcess(){
+  def dest = getArg('dest')
+  def File myfile = file(dest)
+  def process = new ProcessBuilder("./mvnw",  "spring-boot:run")
+  process.redirectErrorStream(true)
+  process.directory(myfile)
+  process.start()
+  //process.inputStream.eachLine {println it}
+}
+
+task runAsync {
+  doLast {
+    createProcess()
+  }
+}
+
+runAsync.mustRunAfter copySpringConfigClass
+
+runAsync.dependsOn clean
+runAsync.dependsOn makeDir
+runAsync.dependsOn copySourceCode
+runAsync.dependsOn deletePomFile
+runAsync.dependsOn copySpringFoxPom
+runAsync.dependsOn copySpringConfigClass
